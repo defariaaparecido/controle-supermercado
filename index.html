@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teste de câmera - Controle Supermercado</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; padding: 16px; background: #f4f6f8; color: #1c2733; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 14px; color: #55636f; font-size: 14px; }
+  button { width: 100%; padding: 16px; font-size: 18px; border: 0; border-radius: 10px; background: #1565c0; color: #fff; }
+  button:disabled { background: #9fb3c8; }
+  video { width: 100%; margin-top: 14px; border-radius: 10px; background: #000; display: none; }
+  #codigo { margin-top: 14px; padding: 16px; border-radius: 10px; background: #fff; border: 2px solid #c9d3dc; font-size: 26px; font-weight: bold; text-align: center; word-break: break-all; }
+  #codigo.ok { border-color: #2e7d32; color: #2e7d32; }
+  #codigo.ruim { border-color: #c62828; color: #c62828; }
+  #diag { margin-top: 14px; padding: 12px; border-radius: 10px; background: #fff; font-size: 14px; line-height: 1.6; word-break: break-word; }
+  .versao { margin-top: 10px; font-size: 12px; color: #7a8894; text-align: center; }
+</style>
+</head>
+<body>
+<h1>Teste de câmera</h1>
+<p class="sub">Controle Supermercado - teste do leitor de código de barras</p>
+
+<button id="btn">Abrir câmera</button>
+<video id="video" playsinline muted></video>
+<div id="codigo">Nenhum código lido ainda</div>
+<div id="diag"></div>
+<div class="versao">Teste 01 - 10/10/2026</div>
+
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+var btn = document.getElementById('btn');
+var video = document.getElementById('video');
+var caixa = document.getElementById('codigo');
+var diag = document.getElementById('diag');
+var linhas = {};
+
+function mostra(chave, texto) {
+  linhas[chave] = texto;
+  var html = '';
+  for (var k in linhas) { html += '<b>' + k + ':</b> ' + linhas[k] + '<br>'; }
+  diag.innerHTML = html;
+}
+
+function digitoConfere(cod) {
+  if (!/^\d{8}$|^\d{12,13}$/.test(cod)) { return false; }
+  var d = cod.split('').map(Number);
+  var ultimo = d.pop();
+  var soma = 0;
+  for (var i = d.length - 1, peso = 3; i >= 0; i--, peso = 4 - peso) { soma += d[i] * peso; }
+  return (10 - soma % 10) % 10 === ultimo;
+}
+
+function leu(texto, formato) {
+  var ok = digitoConfere(texto);
+  caixa.textContent = texto;
+  caixa.className = ok ? 'ok' : 'ruim';
+  mostra('Último código lido', texto + ' (' + formato + ')');
+  mostra('Dígito verificador', ok ? 'confere' : 'NÃO confere');
+  if (navigator.vibrate) { navigator.vibrate(80); }
+}
+
+var temNativo = ('BarcodeDetector' in window);
+var temZXing = (typeof ZXing !== 'undefined');
+mostra('Página segura (https)', window.isSecureContext ? 'sim' : 'NÃO');
+mostra('Câmera disponível no navegador', (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) ? 'sim' : 'NÃO');
+mostra('Leitor nativo do navegador', temNativo ? 'sim' : 'não');
+mostra('Leitor de apoio (ZXing)', temZXing ? 'carregado' : 'NÃO carregou');
+mostra('Navegador', navigator.userAgent);
+
+function lerNativo() {
+  var detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] });
+  mostra('Leitor em uso', 'nativo do navegador');
+  setInterval(function () {
+    if (video.readyState < 2) { return; }
+    detector.detect(video).then(function (achados) {
+      if (achados.length) { leu(achados[0].rawValue, achados[0].format); }
+    }).catch(function (e) { mostra('Erro do leitor', e.name + ' - ' + e.message); });
+  }, 300);
+}
+
+function lerZXing() {
+  var dicas = new Map();
+  dicas.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
+    [ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A]);
+  var leitor = new ZXing.BrowserMultiFormatReader(dicas);
+  mostra('Leitor em uso', 'ZXing');
+  leitor.decodeFromStream(video.srcObject, video, function (resultado) {
+    if (resultado) { leu(resultado.getText(), ZXing.BarcodeFormat[resultado.getBarcodeFormat()]); }
+  });
+}
+
+btn.onclick = function () {
+  btn.disabled = true;
+  mostra('Câmera', 'pedindo permissão...');
+  navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+  }).then(function (fluxo) {
+    video.srcObject = fluxo;
+    video.style.display = 'block';
+    var faixa = fluxo.getVideoTracks()[0];
+    var cfg = faixa.getSettings();
+    mostra('Câmera', 'ABRIU - ' + faixa.label + ' (' + cfg.width + ' x ' + cfg.height + ')');
+    btn.textContent = 'Câmera aberta - aponte para um código de barras';
+    return video.play();
+  }).then(function () {
+    if (temNativo) { lerNativo(); }
+    else if (temZXing) { lerZXing(); }
+    else { mostra('Leitor em uso', 'NENHUM disponível'); }
+  }).catch(function (e) {
+    btn.disabled = false;
+    mostra('Câmera', 'NÃO ABRIU - ' + e.name + ' - ' + e.message);
+  });
+};
+</script>
+</body>
+</html>
