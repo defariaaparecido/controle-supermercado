@@ -3,80 +3,245 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teste de câmera - Controle Supermercado</title>
+<meta name="color-scheme" content="light dark">
+<title>Consulta de preços - Controle Supermercado</title>
 <style>
-  body { font-family: Arial, sans-serif; margin: 0; padding: 16px; background: #f4f6f8; color: #1c2733; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  p.sub { margin: 0 0 14px; color: #55636f; font-size: 14px; }
-  button { width: 100%; padding: 16px; font-size: 18px; border: 0; border-radius: 10px; background: #1565c0; color: #fff; }
-  button:disabled { background: #9fb3c8; }
-  video { width: 100%; margin-top: 14px; border-radius: 10px; background: #000; display: none; }
-  #codigo { margin-top: 14px; padding: 16px; border-radius: 10px; background: #fff; border: 2px solid #c9d3dc; font-size: 26px; font-weight: bold; text-align: center; word-break: break-all; }
-  #codigo.ok { border-color: #2e7d32; color: #2e7d32; }
-  #codigo.ruim { border-color: #c62828; color: #c62828; }
-  #diag { margin-top: 14px; padding: 12px; border-radius: 10px; background: #fff; font-size: 14px; line-height: 1.6; word-break: break-word; }
-  .versao { margin-top: 10px; font-size: 12px; color: #7a8894; text-align: center; }
+  :root { --fundo:#f3f5f7; --cartao:#ffffff; --texto:#17212b; --suave:#5b6875; --linha:#d5dce3; --azul:#1259b8; --verde:#1b7a3a; --alerta:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fundo:#0f1419; --cartao:#1a222b; --texto:#e8edf2; --suave:#9aa7b4; --linha:#2f3b47; --azul:#3d82e0; --verde:#58c27d; --alerta:#ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 12px 14px 24px; background: var(--fundo); color: var(--texto); }
+  h1 { font-size: 18px; margin: 0; }
+  #situacao { font-size: 13px; color: var(--suave); margin: 2px 0 10px; }
+  #situacao.alerta { color: var(--alerta); }
+  #resultado { background: var(--cartao); border: 2px solid var(--linha); border-radius: 12px; padding: 14px; min-height: 96px; }
+  #resultado.achou { border-color: var(--verde); }
+  #resultado.falta { border-color: var(--alerta); }
+  #resNome { font-size: 20px; font-weight: bold; line-height: 1.25; }
+  #resCodigo { font-size: 13px; color: var(--suave); margin-top: 2px; }
+  .bloco { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--linha); }
+  .rotulo { font-size: 12px; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; }
+  .preco { font-size: 30px; font-weight: bold; }
+  .preco.melhor { color: var(--verde); }
+  .onde { font-size: 14px; color: var(--suave); }
+  button { width: 100%; margin-top: 12px; padding: 14px; font-size: 17px; border: 0; border-radius: 10px; background: var(--azul); color: #fff; }
+  button:disabled { opacity: .6; }
+  video { width: 100%; max-height: 34vh; object-fit: cover; margin-top: 10px; border-radius: 10px; background: #000; display: none; }
+  input { width: 100%; margin-top: 14px; padding: 13px; font-size: 16px; border: 1px solid var(--linha); border-radius: 10px; background: var(--cartao); color: var(--texto); }
+  #lista div { background: var(--cartao); border: 1px solid var(--linha); border-radius: 8px; padding: 12px; margin-top: 6px; font-size: 15px; }
+  #versao { margin-top: 16px; font-size: 12px; color: var(--suave); text-align: center; }
 </style>
 </head>
 <body>
-<h1>Teste de câmera</h1>
-<p class="sub">Controle Supermercado - teste do leitor de código de barras</p>
+<h1>Consulta de preços</h1>
+<div id="situacao">Carregando os dados...</div>
+
+<div id="resultado">
+  <div id="resNome">Leia um código de barras ou busque pelo nome</div>
+  <div id="resCodigo"></div>
+  <div id="resDetalhe"></div>
+</div>
 
 <button id="btn">Abrir câmera</button>
 <video id="video" playsinline muted></video>
-<div id="codigo">Nenhum código lido ainda</div>
-<div id="diag"></div>
-<div class="versao">Teste 01 - 10/10/2026</div>
 
-<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<input id="busca" type="search" placeholder="Buscar pelo nome (frutas, verduras, carnes...)" autocomplete="off">
+<div id="lista"></div>
+
+<div id="versao">Versão 1 - 10/10/2026</div>
+
+<script src="zxing.min.js"></script>
 <script>
+var LINK_DADOS = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSACjPlRwPGD9oot4pn3eulM4MevgY1MlYW1eN7bHD9fe3ZY33_OCQOaMiAzwySv135C2uqGLzpGZi1/pub?gid=1553361178&single=true&output=csv';
+var CHAVE_GUARDADA = 'supermercado_consulta_v1';
+
+var elSituacao = document.getElementById('situacao');
+var elResultado = document.getElementById('resultado');
+var elNome = document.getElementById('resNome');
+var elCodigo = document.getElementById('resCodigo');
+var elDetalhe = document.getElementById('resDetalhe');
+var elLista = document.getElementById('lista');
+var elBusca = document.getElementById('busca');
 var btn = document.getElementById('btn');
 var video = document.getElementById('video');
-var caixa = document.getElementById('codigo');
-var diag = document.getElementById('diag');
-var linhas = {};
 
-function mostra(chave, texto) {
-  linhas[chave] = texto;
-  var html = '';
-  for (var k in linhas) { html += '<b>' + k + ':</b> ' + linhas[k] + '<br>'; }
-  diag.innerHTML = html;
+var produtos = [];
+var porCodigo = {};
+
+/* ---------- utilidades ---------- */
+
+function novo(tag, classe, texto) {
+  var e = document.createElement(tag);
+  if (classe) { e.className = classe; }
+  if (texto !== undefined) { e.textContent = texto; }   /* sempre texto puro, nunca código */
+  return e;
 }
 
-function digitoConfere(cod) {
-  if (!/^\d{8}$|^\d{12,13}$/.test(cod)) { return false; }
-  var d = cod.split('').map(Number);
-  var ultimo = d.pop();
-  var soma = 0;
-  for (var i = d.length - 1, peso = 3; i >= 0; i--, peso = 4 - peso) { soma += d[i] * peso; }
-  return (10 - soma % 10) % 10 === ultimo;
+function semAcento(s) {
+  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
-function leu(texto, formato) {
-  var ok = digitoConfere(texto);
-  caixa.textContent = texto;
-  caixa.className = ok ? 'ok' : 'ruim';
-  mostra('Último código lido', texto + ' (' + formato + ')');
-  mostra('Dígito verificador', ok ? 'confere' : 'NÃO confere');
+function chaveCodigo(c) {
+  return String(c).replace(/\D/g, '').replace(/^0+/, '');
+}
+
+function dinheiro(v) {
+  var n = parseFloat(String(v).replace(/\./g, '').replace(',', '.'));
+  if (isNaN(n)) { return String(v); }
+  return 'R$ ' + n.toFixed(2).replace('.', ',');
+}
+
+function lerCSV(texto) {
+  var linhas = [], linha = [], campo = '', aspas = false;
+  for (var k = 0; k < texto.length; k++) {
+    var c = texto.charAt(k);
+    if (aspas) {
+      if (c === '"') {
+        if (texto.charAt(k + 1) === '"') { campo += '"'; k++; } else { aspas = false; }
+      } else { campo += c; }
+    } else if (c === '"') { aspas = true; }
+    else if (c === ',') { linha.push(campo); campo = ''; }
+    else if (c === '\n') { linha.push(campo); linhas.push(linha); linha = []; campo = ''; }
+    else if (c !== '\r') { campo += c; }
+  }
+  if (campo !== '' || linha.length) { linha.push(campo); linhas.push(linha); }
+  return linhas;
+}
+
+/* ---------- dados ---------- */
+
+function montarBase(texto) {
+  var linhas = lerCSV(texto);
+  if (linhas.length < 2) { return false; }
+  var cab = linhas[0].map(function (t) { return t.trim(); });
+  var col = function (nome) { return cab.indexOf(nome); };
+  var iCod = col('Código'), iProd = col('Produto'), iPreco = col('Último preço'),
+      iRede = col('Rede da última compra'), iData = col('Data da última compra'),
+      iMRede = col('Melhor rede'), iMPreco = col('Melhor preço'), iMData = col('Data do melhor preço'),
+      iUn = col('Unidade');
+  if (iCod < 0 || iProd < 0 || iPreco < 0) { return false; }
+  var lista = [], indice = {};
+  for (var k = 1; k < linhas.length; k++) {
+    var l = linhas[k];
+    if (!l[iProd]) { continue; }
+    var p = {
+      codigo: l[iCod] || '', produto: l[iProd], preco: l[iPreco] || '',
+      rede: l[iRede] || '', data: l[iData] || '',
+      mRede: l[iMRede] || '', mPreco: l[iMPreco] || '', mData: l[iMData] || '',
+      unidade: iUn >= 0 ? (l[iUn] || '') : ''
+    };
+    lista.push(p);
+    var ch = chaveCodigo(p.codigo);
+    if (ch.length >= 8) { indice[ch] = p; }
+  }
+  if (!lista.length) { return false; }
+  produtos = lista;
+  porCodigo = indice;
+  return true;
+}
+
+function hora(d) {
+  var z = function (n) { return (n < 10 ? '0' : '') + n; };
+  return z(d.getDate()) + '/' + z(d.getMonth() + 1) + ' às ' + z(d.getHours()) + ':' + z(d.getMinutes());
+}
+
+function carregar() {
+  fetch(LINK_DADOS, { cache: 'no-store' }).then(function (r) {
+    if (!r.ok) { throw new Error('resposta ' + r.status); }
+    return r.text();
+  }).then(function (texto) {
+    if (!montarBase(texto)) { throw new Error('dados em formato inesperado'); }
+    var agora = new Date();
+    elSituacao.className = '';
+    elSituacao.textContent = produtos.length + ' produtos - dados lidos em ' + hora(agora);
+    try { localStorage.setItem(CHAVE_GUARDADA, JSON.stringify({ quando: agora.getTime(), texto: texto })); } catch (e) {}
+  }).catch(function (erro) {
+    var guardado = null;
+    try { guardado = JSON.parse(localStorage.getItem(CHAVE_GUARDADA)); } catch (e) {}
+    elSituacao.className = 'alerta';
+    if (guardado && montarBase(guardado.texto)) {
+      elSituacao.textContent = 'Sem conexão com a planilha. Usando ' + produtos.length +
+        ' produtos guardados em ' + hora(new Date(guardado.quando)) + '.';
+    } else {
+      elSituacao.textContent = 'Não foi possível ler os dados (' + erro.message + '). Verifique a internet e recarregue a página.';
+    }
+  });
+}
+
+/* ---------- tela ---------- */
+
+function bloco(rotulo, preco, unidade, rede, data, melhor) {
+  var b = novo('div', 'bloco');
+  b.appendChild(novo('div', 'rotulo', rotulo));
+  b.appendChild(novo('div', melhor ? 'preco melhor' : 'preco', dinheiro(preco) + (unidade ? ' / ' + unidade : '')));
+  b.appendChild(novo('div', 'onde', rede + (data ? ' - ' + data : '')));
+  return b;
+}
+
+function mostrarProduto(p) {
+  elResultado.className = 'achou';
+  elNome.textContent = p.produto;
+  elCodigo.textContent = 'Código ' + p.codigo;
+  elDetalhe.textContent = '';
+  elDetalhe.appendChild(bloco('Último preço pago', p.preco, p.unidade, p.rede, p.data, false));
+  if (p.mRede) {
+    elDetalhe.appendChild(bloco('Melhor preço', p.mPreco, p.unidade, p.mRede, p.mData, true));
+  }
+}
+
+function mostrarNaoAchou(codigo) {
+  elResultado.className = 'falta';
+  elNome.textContent = 'Produto ainda não comprado';
+  elCodigo.textContent = 'Código ' + codigo + ' não está na base';
+  elDetalhe.textContent = '';
+}
+
+var ultimoLido = '', ultimaVez = 0;
+
+function leu(codigo) {
+  var agora = Date.now();
+  if (codigo === ultimoLido && agora - ultimaVez < 3000) { ultimaVez = agora; return; }
+  ultimoLido = codigo; ultimaVez = agora;
   if (navigator.vibrate) { navigator.vibrate(80); }
+  var p = porCodigo[chaveCodigo(codigo)];
+  if (p) { mostrarProduto(p); } else { mostrarNaoAchou(codigo); }
+  window.scrollTo(0, 0);
 }
 
-var temNativo = ('BarcodeDetector' in window);
-var temZXing = (typeof ZXing !== 'undefined');
-mostra('Página segura (https)', window.isSecureContext ? 'sim' : 'NÃO');
-mostra('Câmera disponível no navegador', (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) ? 'sim' : 'NÃO');
-mostra('Leitor nativo do navegador', temNativo ? 'sim' : 'não');
-mostra('Leitor de apoio (ZXing)', temZXing ? 'carregado' : 'NÃO carregou');
-mostra('Navegador', navigator.userAgent);
+elBusca.oninput = function () {
+  var termo = semAcento(elBusca.value.trim());
+  elLista.textContent = '';
+  if (termo.length < 2) { return; }
+  var achados = produtos.filter(function (p) { return semAcento(p.produto).indexOf(termo) >= 0; }).slice(0, 12);
+  if (!achados.length) { elLista.appendChild(novo('div', '', 'Nenhum produto com esse nome.')); return; }
+  achados.forEach(function (p) {
+    var item = novo('div', '', p.produto);
+    item.onclick = function () { mostrarProduto(p); window.scrollTo(0, 0); };
+    elLista.appendChild(item);
+  });
+};
+
+/* ---------- câmera ---------- */
+
+var fluxo = null, relogio = null, leitorZX = null;
+
+function fecharCamera() {
+  if (relogio) { clearInterval(relogio); relogio = null; }
+  if (leitorZX) { try { leitorZX.reset(); } catch (e) {} leitorZX = null; }
+  if (fluxo) { fluxo.getTracks().forEach(function (t) { t.stop(); }); fluxo = null; }
+  video.srcObject = null;
+  video.style.display = 'none';
+  btn.textContent = 'Abrir câmera';
+}
 
 function lerNativo() {
   var detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] });
-  mostra('Leitor em uso', 'nativo do navegador');
-  setInterval(function () {
+  relogio = setInterval(function () {
     if (video.readyState < 2) { return; }
     detector.detect(video).then(function (achados) {
-      if (achados.length) { leu(achados[0].rawValue, achados[0].format); }
-    }).catch(function (e) { mostra('Erro do leitor', e.name + ' - ' + e.message); });
+      if (achados.length) { leu(achados[0].rawValue); }
+    }).catch(function () {});
   }, 300);
 }
 
@@ -84,36 +249,37 @@ function lerZXing() {
   var dicas = new Map();
   dicas.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
     [ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A]);
-  var leitor = new ZXing.BrowserMultiFormatReader(dicas);
-  mostra('Leitor em uso', 'ZXing');
-  leitor.decodeFromStream(video.srcObject, video, function (resultado) {
-    if (resultado) { leu(resultado.getText(), ZXing.BarcodeFormat[resultado.getBarcodeFormat()]); }
+  leitorZX = new ZXing.BrowserMultiFormatReader(dicas);
+  leitorZX.decodeFromStream(fluxo, video, function (resultado) {
+    if (resultado) { leu(resultado.getText()); }
   });
 }
 
 btn.onclick = function () {
+  if (fluxo) { fecharCamera(); return; }
   btn.disabled = true;
-  mostra('Câmera', 'pedindo permissão...');
   navigator.mediaDevices.getUserMedia({
     audio: false,
     video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
-  }).then(function (fluxo) {
-    video.srcObject = fluxo;
+  }).then(function (f) {
+    fluxo = f;
+    video.srcObject = f;
     video.style.display = 'block';
-    var faixa = fluxo.getVideoTracks()[0];
-    var cfg = faixa.getSettings();
-    mostra('Câmera', 'ABRIU - ' + faixa.label + ' (' + cfg.width + ' x ' + cfg.height + ')');
-    btn.textContent = 'Câmera aberta - aponte para um código de barras';
+    btn.disabled = false;
+    btn.textContent = 'Fechar câmera';
     return video.play();
   }).then(function () {
-    if (temNativo) { lerNativo(); }
-    else if (temZXing) { lerZXing(); }
-    else { mostra('Leitor em uso', 'NENHUM disponível'); }
+    if ('BarcodeDetector' in window) { lerNativo(); }
+    else if (typeof ZXing !== 'undefined') { lerZXing(); }
+    else { elSituacao.className = 'alerta'; elSituacao.textContent = 'Este navegador não tem leitor de código de barras. Use a busca pelo nome.'; }
   }).catch(function (e) {
     btn.disabled = false;
-    mostra('Câmera', 'NÃO ABRIU - ' + e.name + ' - ' + e.message);
+    elSituacao.className = 'alerta';
+    elSituacao.textContent = 'A câmera não abriu (' + e.name + '). Verifique a permissão da câmera para este site.';
   });
 };
+
+carregar();
 </script>
 </body>
 </html>
