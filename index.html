@@ -49,7 +49,7 @@
 <input id="busca" type="search" placeholder="Buscar pelo nome (frutas, verduras, carnes...)" autocomplete="off">
 <div id="lista"></div>
 
-<div id="versao">Versão 1 - 10/10/2026</div>
+<div id="versao">Versão 2 - 10/10/2026</div>
 
 <script src="zxing.min.js"></script>
 <script>
@@ -174,7 +174,7 @@ function carregar() {
 function bloco(rotulo, preco, unidade, rede, data, melhor) {
   var b = novo('div', 'bloco');
   b.appendChild(novo('div', 'rotulo', rotulo));
-  b.appendChild(novo('div', melhor ? 'preco melhor' : 'preco', dinheiro(preco) + (unidade ? ' / ' + unidade : '')));
+  b.appendChild(novo('div', melhor ? 'preco melhor' : 'preco', dinheiro(preco) + (String(unidade).trim().toLowerCase() === 'kg' ? ' / kg' : '')));
   b.appendChild(novo('div', 'onde', rede + (data ? ' - ' + data : '')));
   return b;
 }
