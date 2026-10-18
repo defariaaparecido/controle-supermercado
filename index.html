@@ -31,12 +31,46 @@
   input { width: 100%; margin-top: 14px; padding: 13px; font-size: 16px; border: 1px solid var(--linha); border-radius: 10px; background: var(--cartao); color: var(--texto); }
   #lista div { background: var(--cartao); border: 1px solid var(--linha); border-radius: 8px; padding: 12px; margin-top: 6px; font-size: 15px; }
   #versao { margin-top: 16px; font-size: 12px; color: var(--suave); text-align: center; }
+  /* abas */
+  #abas { display: flex; gap: 8px; margin: 0 0 10px; }
+  #abas button { margin-top: 0; padding: 11px 6px; font-size: 16px; background: var(--cartao); color: var(--texto); border: 2px solid var(--linha); }
+  #abas button.ativa { background: var(--azul); color: #fff; border-color: var(--azul); }
+  .tela { display: none; }
+  .tela.ativa { display: block; }
+  /* lista de compras */
+  #resumoLista { background: var(--cartao); border: 2px solid var(--linha); border-radius: 12px; padding: 12px 14px; display: flex; justify-content: space-between; gap: 10px; }
+  #resumoLista .valor { font-size: 22px; font-weight: bold; }
+  #resumoLista .pego { color: var(--verde); }
+  #semPreco { font-size: 12px; color: var(--suave); margin-top: 4px; min-height: 14px; }
+  #sugestoes div { background: var(--cartao); border: 1px solid var(--linha); border-radius: 8px; padding: 12px; margin-top: 6px; font-size: 15px; }
+  #sugestoes div.livre { border-style: dashed; color: var(--suave); }
+  #itens { margin-top: 12px; }
+  .item { background: var(--cartao); border: 1px solid var(--linha); border-radius: 10px; padding: 10px 12px; margin-top: 8px; }
+  .item .topo { display: flex; align-items: flex-start; gap: 10px; }
+  .item .nome { flex: 1; font-size: 16px; font-weight: bold; line-height: 1.25; }
+  .item .info { font-size: 13px; color: var(--suave); margin-top: 3px; }
+  .item .baixo { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; gap: 8px; }
+  .item .qtd { display: flex; align-items: center; gap: 6px; }
+  .item .qtd button { width: 42px; height: 42px; margin: 0; padding: 0; font-size: 22px; }
+  .item .qtd span { min-width: 64px; text-align: center; font-size: 16px; }
+  .item .estimado { font-size: 18px; font-weight: bold; }
+  .item input[type=checkbox] { width: 28px; height: 28px; margin: 0; }
+  .item.pego { opacity: .55; }
+  .item.pego .nome, .item.pego .estimado { text-decoration: line-through; }
+  #vazia { text-align: center; color: var(--suave); padding: 18px 0 6px; font-size: 15px; }
+  #limpar { background: var(--alerta); }
 </style>
 </head>
 <body>
-<h1>Consulta de preços</h1>
+<h1>Controle Supermercado</h1>
 <div id="situacao">Carregando os dados...</div>
 
+<div id="abas">
+  <button id="abaConsulta" class="ativa">Consulta</button>
+  <button id="abaLista">Lista de compras</button>
+</div>
+
+<div id="telaConsulta" class="tela ativa">
 <div id="resultado">
   <div id="resNome">Leia um código de barras ou busque pelo nome</div>
   <div id="resCodigo"></div>
@@ -48,8 +82,22 @@
 
 <input id="busca" type="search" placeholder="Buscar pelo nome (frutas, verduras, carnes...)" autocomplete="off">
 <div id="lista"></div>
+</div>
 
-<div id="versao">Versão 2 - 10/10/2026</div>
+<div id="telaLista" class="tela">
+  <div id="resumoLista">
+    <div><div class="rotulo">Total estimado</div><div class="valor" id="totEstimado">R$ 0,00</div></div>
+    <div style="text-align:right"><div class="rotulo">Já peguei</div><div class="valor pego" id="totPego">R$ 0,00</div></div>
+  </div>
+  <div id="semPreco"></div>
+  <input id="novoItem" type="search" placeholder="Adicionar item (digite o nome)" autocomplete="off">
+  <div id="sugestoes"></div>
+  <div id="itens"></div>
+  <div id="vazia">A lista está vazia.</div>
+  <button id="limpar">Limpar itens pegos</button>
+</div>
+
+<div id="versao">Versão 3 - 17/10/2026</div>
 
 <script src="zxing.min.js"></script>
 <script>
@@ -156,6 +204,7 @@ function carregar() {
     elSituacao.className = '';
     elSituacao.textContent = produtos.length + ' produtos - dados lidos em ' + hora(agora);
     try { localStorage.setItem(CHAVE_GUARDADA, JSON.stringify({ quando: agora.getTime(), texto: texto })); } catch (e) {}
+    desenharLista();
   }).catch(function (erro) {
     var guardado = null;
     try { guardado = JSON.parse(localStorage.getItem(CHAVE_GUARDADA)); } catch (e) {}
@@ -166,6 +215,7 @@ function carregar() {
     } else {
       elSituacao.textContent = 'Não foi possível ler os dados (' + erro.message + '). Verifique a internet e recarregue a página.';
     }
+    desenharLista();
   });
 }
 
@@ -279,6 +329,157 @@ btn.onclick = function () {
   });
 };
 
+/* ---------- abas ---------- */
+
+var abaConsulta = document.getElementById('abaConsulta');
+var abaLista = document.getElementById('abaLista');
+var telaConsulta = document.getElementById('telaConsulta');
+var telaLista = document.getElementById('telaLista');
+
+function trocarAba(lista) {
+  if (lista && fluxo) { fecharCamera(); }
+  abaConsulta.className = lista ? '' : 'ativa';
+  abaLista.className = lista ? 'ativa' : '';
+  telaConsulta.className = lista ? 'tela' : 'tela ativa';
+  telaLista.className = lista ? 'tela ativa' : 'tela';
+  window.scrollTo(0, 0);
+}
+abaConsulta.onclick = function () { trocarAba(false); };
+abaLista.onclick = function () { trocarAba(true); };
+
+/* ---------- lista de compras (guardada só neste celular) ---------- */
+
+var CHAVE_LISTA = 'supermercado_lista_v1';
+var elNovo = document.getElementById('novoItem');
+var elSugestoes = document.getElementById('sugestoes');
+var elItens = document.getElementById('itens');
+var elVazia = document.getElementById('vazia');
+var elTotEst = document.getElementById('totEstimado');
+var elTotPego = document.getElementById('totPego');
+var elSemPreco = document.getElementById('semPreco');
+var btnLimpar = document.getElementById('limpar');
+
+var itensLista = [];
+try { itensLista = JSON.parse(localStorage.getItem(CHAVE_LISTA)) || []; } catch (e) { itensLista = []; }
+if (!Array.isArray(itensLista)) { itensLista = []; }
+
+function gravarLista() {
+  try { localStorage.setItem(CHAVE_LISTA, JSON.stringify(itensLista)); } catch (e) {}
+}
+
+function numero(v) {
+  var n = parseFloat(String(v).replace(/\./g, '').replace(',', '.'));
+  return isNaN(n) ? null : n;
+}
+
+function produtoDaBase(nome) {
+  for (var k = 0; k < produtos.length; k++) {
+    if (produtos[k].produto === nome) { return produtos[k]; }
+  }
+  return null;
+}
+
+function ehKg(p) { return p && String(p.unidade).trim().toLowerCase() === 'kg'; }
+
+function passo(item) { var p = produtoDaBase(item.nome); return ehKg(p) ? 0.5 : 1; }
+
+function textoQtd(item) {
+  var p = produtoDaBase(item.nome);
+  if (ehKg(p)) { return item.qtd.toFixed(1).replace('.', ',') + ' kg'; }
+  return String(item.qtd);
+}
+
+function adicionar(nome) {
+  nome = String(nome).trim();
+  if (!nome) { return; }
+  for (var k = 0; k < itensLista.length; k++) {
+    if (semAcento(itensLista[k].nome) === semAcento(nome)) {
+      itensLista[k].qtd += passo(itensLista[k]);
+      itensLista[k].peguei = false;
+      gravarLista(); desenharLista(); return;
+    }
+  }
+  var p = produtoDaBase(nome);
+  itensLista.push({ nome: nome, qtd: 1, peguei: false });
+  gravarLista(); desenharLista();
+}
+
+function desenharLista() {
+  elItens.textContent = '';
+  var total = 0, pego = 0, sem = 0;
+  itensLista.forEach(function (item, idx) {
+    var p = produtoDaBase(item.nome);
+    var preco = p ? numero(p.preco) : null;
+    var estimado = preco !== null ? Math.round(preco * item.qtd * 100) / 100 : null;
+    if (estimado !== null) { total += estimado; if (item.peguei) { pego += estimado; } } else { sem++; }
+
+    var caixa = novo('div', item.peguei ? 'item pego' : 'item');
+    var topo = novo('div', 'topo');
+    var nomes = novo('div', '');
+    nomes.style.flex = '1';
+    nomes.appendChild(novo('div', 'nome', item.nome));
+    nomes.appendChild(novo('div', 'info', preco !== null ? dinheiro(p.preco) + (ehKg(p) ? ' / kg' : '') : 'sem preço'));
+    topo.appendChild(nomes);
+    var marca = document.createElement('input');
+    marca.type = 'checkbox';
+    marca.checked = !!item.peguei;
+    marca.title = 'Peguei';
+    marca.onchange = function () { item.peguei = marca.checked; gravarLista(); desenharLista(); };
+    topo.appendChild(marca);
+    caixa.appendChild(topo);
+
+    var baixo = novo('div', 'baixo');
+    var qtd = novo('div', 'qtd');
+    var menos = novo('button', '', '−');
+    var mais = novo('button', '', '+');
+    menos.onclick = function () {
+      item.qtd = Math.round((item.qtd - passo(item)) * 10) / 10;
+      if (item.qtd <= 0) { itensLista.splice(idx, 1); }
+      gravarLista(); desenharLista();
+    };
+    mais.onclick = function () {
+      item.qtd = Math.round((item.qtd + passo(item)) * 10) / 10;
+      gravarLista(); desenharLista();
+    };
+    qtd.appendChild(menos);
+    qtd.appendChild(novo('span', '', textoQtd(item)));
+    qtd.appendChild(mais);
+    baixo.appendChild(qtd);
+    baixo.appendChild(novo('div', 'estimado', estimado !== null ? dinheiro(estimado.toFixed(2).replace('.', ',')) : '—'));
+    caixa.appendChild(baixo);
+    elItens.appendChild(caixa);
+  });
+  elTotEst.textContent = dinheiro(total.toFixed(2).replace('.', ','));
+  elTotPego.textContent = dinheiro(pego.toFixed(2).replace('.', ','));
+  elSemPreco.textContent = sem ? sem + (sem === 1 ? ' item sem preço, fora do total' : ' itens sem preço, fora do total') : '';
+  elVazia.style.display = itensLista.length ? 'none' : 'block';
+  btnLimpar.style.display = itensLista.some(function (i) { return i.peguei; }) ? 'block' : 'none';
+}
+
+elNovo.oninput = function () {
+  var digitado = elNovo.value.trim();
+  var termo = semAcento(digitado);
+  elSugestoes.textContent = '';
+  if (termo.length < 2) { return; }
+  produtos.filter(function (p) { return semAcento(p.produto).indexOf(termo) >= 0; }).slice(0, 8).forEach(function (p) {
+    var s = novo('div', '', p.produto);
+    s.onclick = function () { adicionar(p.produto); elNovo.value = ''; elSugestoes.textContent = ''; };
+    elSugestoes.appendChild(s);
+  });
+  var exato = produtos.some(function (p) { return semAcento(p.produto) === termo; });
+  if (!exato) {
+    var livre = novo('div', 'livre', 'Adicionar "' + digitado + '" (sem preço)');
+    livre.onclick = function () { adicionar(digitado); elNovo.value = ''; elSugestoes.textContent = ''; };
+    elSugestoes.appendChild(livre);
+  }
+};
+
+btnLimpar.onclick = function () {
+  itensLista = itensLista.filter(function (i) { return !i.peguei; });
+  gravarLista(); desenharLista();
+};
+
+desenharLista();
 carregar();
 </script>
 </body>
