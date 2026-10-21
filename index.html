@@ -33,7 +33,7 @@
   #versao { margin-top: 16px; font-size: 12px; color: var(--suave); text-align: center; }
   /* abas */
   #abas { display: flex; gap: 8px; margin: 0 0 10px; }
-  #abas button { margin-top: 0; padding: 11px 6px; font-size: 16px; background: var(--cartao); color: var(--texto); border: 2px solid var(--linha); }
+  #abas button { margin-top: 0; padding: 10px 4px; font-size: 15px; line-height: 1.2; background: var(--cartao); color: var(--texto); border: 2px solid var(--linha); }
   #abas button.ativa { background: var(--azul); color: #fff; border-color: var(--azul); }
   .tela { display: none; }
   .tela.ativa { display: block; }
@@ -59,6 +59,16 @@
   .item.pego .nome, .item.pego .estimado { text-decoration: line-through; }
   #vazia { text-align: center; color: var(--suave); padding: 18px 0 6px; font-size: 15px; }
   #limpar { background: var(--alerta); }
+  /* inflação familiar */
+  .indice { background: var(--cartao); border: 2px solid var(--linha); border-radius: 12px; padding: 14px; margin-top: 10px; }
+  .indice .nomeInd { font-size: 17px; font-weight: bold; }
+  .indice .pct { font-size: 38px; font-weight: bold; margin-top: 4px; }
+  .indice .pct.sobe { color: var(--alerta); }
+  .indice .pct.desce { color: var(--verde); }
+  .indice .info { font-size: 14px; color: var(--suave); margin-top: 4px; }
+  #infSituacao { font-size: 13px; color: var(--suave); margin-top: 4px; }
+  #infSituacao.alerta { color: var(--alerta); }
+  #infNota { font-size: 13px; color: var(--suave); margin-top: 12px; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -68,6 +78,7 @@
 <div id="abas">
   <button id="abaConsulta" class="ativa">Consulta</button>
   <button id="abaLista">Lista de compras</button>
+  <button id="abaInflacao">Inflação</button>
 </div>
 
 <div id="telaConsulta" class="tela ativa">
@@ -97,12 +108,21 @@
   <button id="limpar">Limpar itens pegos</button>
 </div>
 
-<div id="versao">Versão 3 - 17/10/2026</div>
+<div id="telaInflacao" class="tela">
+  <div class="rotulo">Inflação familiar no período</div>
+  <div id="infSituacao">Carregando...</div>
+  <div id="infCartoes"></div>
+  <div id="infNota">Variação do que você pagou em cada produto, entre a primeira e a última compra, pesada pelo quanto você gastou com ele. Produto comprado uma vez só conta como zero. Redes juntas.</div>
+</div>
+
+<div id="versao">Versão 4 - 20/10/2026</div>
 
 <script src="zxing.min.js"></script>
 <script>
 var LINK_DADOS = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSACjPlRwPGD9oot4pn3eulM4MevgY1MlYW1eN7bHD9fe3ZY33_OCQOaMiAzwySv135C2uqGLzpGZi1/pub?gid=1553361178&single=true&output=csv';
+var LINK_INFLACAO = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSACjPlRwPGD9oot4pn3eulM4MevgY1MlYW1eN7bHD9fe3ZY33_OCQOaMiAzwySv135C2uqGLzpGZi1/pub?gid=1981001140&single=true&output=csv';
 var CHAVE_GUARDADA = 'supermercado_consulta_v1';
+var CHAVE_INFLACAO = 'supermercado_inflacao_v1';
 
 var elSituacao = document.getElementById('situacao');
 var elResultado = document.getElementById('resultado');
@@ -336,16 +356,82 @@ var abaLista = document.getElementById('abaLista');
 var telaConsulta = document.getElementById('telaConsulta');
 var telaLista = document.getElementById('telaLista');
 
-function trocarAba(lista) {
-  if (lista && fluxo) { fecharCamera(); }
-  abaConsulta.className = lista ? '' : 'ativa';
-  abaLista.className = lista ? 'ativa' : '';
-  telaConsulta.className = lista ? 'tela' : 'tela ativa';
-  telaLista.className = lista ? 'tela ativa' : 'tela';
+var abaInflacao = document.getElementById('abaInflacao');
+var telaInflacao = document.getElementById('telaInflacao');
+
+function trocarAba(qual) {
+  if (qual !== 'consulta' && fluxo) { fecharCamera(); }
+  abaConsulta.className = qual === 'consulta' ? 'ativa' : '';
+  abaLista.className = qual === 'lista' ? 'ativa' : '';
+  abaInflacao.className = qual === 'inflacao' ? 'ativa' : '';
+  telaConsulta.className = qual === 'consulta' ? 'tela ativa' : 'tela';
+  telaLista.className = qual === 'lista' ? 'tela ativa' : 'tela';
+  telaInflacao.className = qual === 'inflacao' ? 'tela ativa' : 'tela';
   window.scrollTo(0, 0);
 }
-abaConsulta.onclick = function () { trocarAba(false); };
-abaLista.onclick = function () { trocarAba(true); };
+abaConsulta.onclick = function () { trocarAba('consulta'); };
+abaLista.onclick = function () { trocarAba('lista'); };
+abaInflacao.onclick = function () { trocarAba('inflacao'); };
+
+/* ---------- inflação familiar (aba Inflacao da planilha) ---------- */
+
+var elInfSit = document.getElementById('infSituacao');
+var elInfCartoes = document.getElementById('infCartoes');
+
+function montarInflacao(texto) {
+  var linhas = lerCSV(texto);
+  if (linhas.length < 2) { return false; }
+  var cab = linhas[0].map(function (t) { return t.trim(); });
+  var col = function (nome) { return cab.indexOf(nome); };
+  var iNome = col('Índice'), iPct = col('Inflação familiar no período (%)'), iMed = col('Produtos medidos'),
+      iTot = col('Produtos no índice'), iDe = col('Desde'), iAte = col('Até');
+  if (iNome < 0 || iPct < 0) { return false; }
+  var cartoes = [];
+  for (var k = 1; k < linhas.length; k++) {
+    var l = linhas[k];
+    if (!l[iNome]) { continue; }
+    var n = parseFloat(String(l[iPct]).replace(/\./g, '').replace(',', '.'));
+    if (isNaN(n)) { continue; }
+    var c = novo('div', 'indice');
+    c.appendChild(novo('div', 'nomeInd', l[iNome]));
+    var txt = (n > 0 ? '+' : '') + n.toFixed(2).replace('.', ',') + '%';
+    c.appendChild(novo('div', 'pct' + (n > 0 ? ' sobe' : (n < 0 ? ' desce' : '')), txt));
+    var med = iMed >= 0 ? l[iMed] : '', tot = iTot >= 0 ? l[iTot] : '';
+    if (med !== '' && tot !== '') {
+      c.appendChild(novo('div', 'info', med + ' de ' + tot + ' produtos com preço comparado'));
+    }
+    if (iDe >= 0 && iAte >= 0 && l[iDe] && l[iAte]) {
+      c.appendChild(novo('div', 'info', 'Período: ' + l[iDe] + ' a ' + l[iAte]));
+    }
+    cartoes.push(c);
+  }
+  if (!cartoes.length) { return false; }
+  elInfCartoes.textContent = '';
+  cartoes.forEach(function (c) { elInfCartoes.appendChild(c); });
+  return true;
+}
+
+function carregarInflacao() {
+  fetch(LINK_INFLACAO, { cache: 'no-store' }).then(function (r) {
+    if (!r.ok) { throw new Error('resposta ' + r.status); }
+    return r.text();
+  }).then(function (texto) {
+    if (!montarInflacao(texto)) { throw new Error('dados em formato inesperado'); }
+    var agora = new Date();
+    elInfSit.className = '';
+    elInfSit.textContent = 'Dados lidos em ' + hora(agora);
+    try { localStorage.setItem(CHAVE_INFLACAO, JSON.stringify({ quando: agora.getTime(), texto: texto })); } catch (e) {}
+  }).catch(function (erro) {
+    var guardado = null;
+    try { guardado = JSON.parse(localStorage.getItem(CHAVE_INFLACAO)); } catch (e) {}
+    elInfSit.className = 'alerta';
+    if (guardado && montarInflacao(guardado.texto)) {
+      elInfSit.textContent = 'Sem conexão com a planilha. Mostrando os dados guardados em ' + hora(new Date(guardado.quando)) + '.';
+    } else {
+      elInfSit.textContent = 'Não foi possível ler o índice (' + erro.message + '). Verifique a internet e recarregue a página.';
+    }
+  });
+}
 
 /* ---------- lista de compras (guardada só neste celular) ---------- */
 
@@ -481,6 +567,7 @@ btnLimpar.onclick = function () {
 
 desenharLista();
 carregar();
+carregarInflacao();
 </script>
 </body>
 </html>
