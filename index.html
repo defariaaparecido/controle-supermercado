@@ -43,7 +43,13 @@
   #resumoLista .pego { color: var(--verde); }
   #semPreco { font-size: 12px; color: var(--suave); margin-top: 4px; min-height: 14px; }
   #sugestoes div { background: var(--cartao); border: 1px solid var(--linha); border-radius: 8px; padding: 12px; margin-top: 6px; font-size: 15px; }
-  #sugestoes div.livre { border-style: dashed; color: var(--suave); }
+  #sugestoes div.livre { background: var(--azul); border-color: var(--azul); color: #fff; font-weight: bold; }
+  #entrar { background: var(--cartao); border: 2px solid var(--linha); border-radius: 12px; padding: 14px; }
+  #entrar .info { font-size: 14px; color: var(--suave); margin-top: 4px; }
+  #erroSenha { color: var(--alerta); font-size: 14px; margin-top: 8px; min-height: 16px; }
+  #listaSit { font-size: 13px; color: var(--suave); margin-top: 6px; }
+  #listaSit.alerta { color: var(--alerta); }
+  #atualizar { background: var(--cartao); color: var(--azul); border: 2px solid var(--azul); }
   #itens { margin-top: 12px; }
   .item { background: var(--cartao); border: 1px solid var(--linha); border-radius: 10px; padding: 10px 12px; margin-top: 8px; }
   .item .topo { display: flex; align-items: flex-start; gap: 10px; }
@@ -96,6 +102,14 @@
 </div>
 
 <div id="telaLista" class="tela">
+  <div id="entrar">
+    <div class="rotulo">Lista única</div>
+    <div class="info">Digite a senha da lista. Só é pedida na primeira vez neste celular.</div>
+    <input id="senhaLista" type="password" placeholder="Senha da lista" autocomplete="current-password">
+    <button id="btnEntrar">Entrar</button>
+    <div id="erroSenha"></div>
+  </div>
+  <div id="conteudoLista">
   <div id="resumoLista">
     <div><div class="rotulo">Total estimado</div><div class="valor" id="totEstimado">R$ 0,00</div></div>
     <div style="text-align:right"><div class="rotulo">Já peguei</div><div class="valor pego" id="totPego">R$ 0,00</div></div>
@@ -106,6 +120,9 @@
   <div id="itens"></div>
   <div id="vazia">A lista está vazia.</div>
   <button id="limpar">Limpar itens pegos</button>
+  <button id="atualizar">Atualizar lista</button>
+  <div id="listaSit"></div>
+  </div>
 </div>
 
 <div id="telaInflacao" class="tela">
@@ -115,7 +132,7 @@
   <div id="infNota">Variação do que você pagou em cada produto, entre a primeira e a última compra, pesada pelo quanto você gastou com ele. Produto comprado uma vez só conta como zero. Redes juntas.</div>
 </div>
 
-<div id="versao">Versão 4 - 20/10/2026</div>
+<div id="versao">Versão 5 - 04/11/2026</div>
 
 <script src="zxing.min.js"></script>
 <script>
@@ -370,7 +387,7 @@ function trocarAba(qual) {
   window.scrollTo(0, 0);
 }
 abaConsulta.onclick = function () { trocarAba('consulta'); };
-abaLista.onclick = function () { trocarAba('lista'); };
+abaLista.onclick = function () { trocarAba('lista'); lerLista(); };
 abaInflacao.onclick = function () { trocarAba('inflacao'); };
 
 /* ---------- inflação familiar (aba Inflacao da planilha) ---------- */
@@ -433,9 +450,18 @@ function carregarInflacao() {
   });
 }
 
-/* ---------- lista de compras (guardada só neste celular) ---------- */
+/* ---------- lista de compras única (gravada na aba Lista da planilha) ---------- */
 
-var CHAVE_LISTA = 'supermercado_lista_v1';
+var LINK_LISTA = 'https://script.google.com/macros/s/AKfycbzfveqFXV5ho7Usx1P444M2xi-wikiH-TC27M2oobBK6fWMYPoPxEOVm4b88YZeb6fMgA/exec';
+var CHAVE_SENHA = 'supermercado_lista_senha';
+var CHAVE_CACHE = 'supermercado_lista_unica_v1';
+var elEntrar = document.getElementById('entrar');
+var elConteudo = document.getElementById('conteudoLista');
+var elSenha = document.getElementById('senhaLista');
+var btnEntrar = document.getElementById('btnEntrar');
+var elErroSenha = document.getElementById('erroSenha');
+var elListaSit = document.getElementById('listaSit');
+var btnAtualizar = document.getElementById('atualizar');
 var elNovo = document.getElementById('novoItem');
 var elSugestoes = document.getElementById('sugestoes');
 var elItens = document.getElementById('itens');
@@ -445,13 +471,15 @@ var elTotPego = document.getElementById('totPego');
 var elSemPreco = document.getElementById('semPreco');
 var btnLimpar = document.getElementById('limpar');
 
-var itensLista = [];
-try { itensLista = JSON.parse(localStorage.getItem(CHAVE_LISTA)) || []; } catch (e) { itensLista = []; }
-if (!Array.isArray(itensLista)) { itensLista = []; }
+/* a lista antiga, guardada só no celular, deixa de ser usada (decisão: a lista única começa vazia) */
+try { localStorage.removeItem('supermercado_lista_v1'); } catch (e) {}
 
-function gravarLista() {
-  try { localStorage.setItem(CHAVE_LISTA, JSON.stringify(itensLista)); } catch (e) {}
-}
+var senhaLista = '';
+try { senhaLista = localStorage.getItem(CHAVE_SENHA) || ''; } catch (e) {}
+
+var itensLista = [];      /* na ordem da aba: o último é o mais recente */
+var pendentes = 0;
+var fila = Promise.resolve();
 
 function numero(v) {
   var n = parseFloat(String(v).replace(/\./g, '').replace(',', '.'));
@@ -467,74 +495,177 @@ function produtoDaBase(nome) {
 
 function ehKg(p) { return p && String(p.unidade).trim().toLowerCase() === 'kg'; }
 
-function passo(item) { var p = produtoDaBase(item.nome); return ehKg(p) ? 0.5 : 1; }
+function passoDe(nome) { return ehKg(produtoDaBase(nome)) ? 0.5 : 1; }
 
 function textoQtd(item) {
-  var p = produtoDaBase(item.nome);
-  if (ehKg(p)) { return item.qtd.toFixed(1).replace('.', ',') + ' kg'; }
+  if (ehKg(produtoDaBase(item.nome))) { return item.qtd.toFixed(1).replace('.', ',') + ' kg'; }
   return String(item.qtd);
 }
 
+function mesmoNome(a, b) { return String(a).trim().toLowerCase() === String(b).trim().toLowerCase(); }
+
+function situacaoLista(texto, alerta) {
+  elListaSit.className = alerta ? 'alerta' : '';
+  elListaSit.textContent = texto;
+}
+
+function guardarCache() {
+  try { localStorage.setItem(CHAVE_CACHE, JSON.stringify({ quando: Date.now(), itens: itensLista })); } catch (e) {}
+}
+
+function aplicar(itensServidor) {
+  itensLista = (itensServidor || []).map(function (i) {
+    return { nome: String(i.item), qtd: Number(i.qtd) || 1, peguei: !!i.peguei };
+  });
+  guardarCache();
+  desenharLista();
+}
+
+function mostrarEntrada(mensagem) {
+  elEntrar.style.display = 'block';
+  elConteudo.style.display = 'none';
+  elErroSenha.textContent = mensagem || '';
+}
+
+function mostrarConteudo() {
+  elEntrar.style.display = 'none';
+  elConteudo.style.display = 'block';
+}
+
+function chamar(dados) {
+  dados.senha = senhaLista;
+  return fetch(LINK_LISTA, { method: 'POST', body: JSON.stringify(dados) }).then(function (r) {
+    if (!r.ok) { throw new Error('resposta ' + r.status); }
+    return r.json();
+  }).then(function (res) {
+    if (!res || !res.ok) { var e = new Error((res && res.erro) || 'erro'); e.servidor = true; throw e; }
+    return res;
+  });
+}
+
+/* cada pedido espera o anterior terminar, para a planilha receber na mesma ordem dos toques */
+function enviar(dados) {
+  pendentes++;
+  if (dados.acao !== 'ler') { situacaoLista('Gravando...', false); }
+  fila = fila.then(function () { return chamar(dados); }).then(function (res) {
+    pendentes--;
+    if (pendentes === 0) {
+      aplicar(res.itens);
+      situacaoLista('Lista atualizada em ' + hora(new Date()), false);
+    }
+  }, function (erro) {
+    pendentes--;
+    if (erro.servidor && erro.message === 'senha') {
+      senhaLista = '';
+      try { localStorage.removeItem(CHAVE_SENHA); } catch (e) {}
+      mostrarEntrada('Senha incorreta. Digite de novo.');
+      return;
+    }
+    situacaoLista('Não foi possível falar com a planilha (' + erro.message + '). O último toque pode não ter sido gravado: verifique a internet e toque em "Atualizar lista".', true);
+  });
+  return fila;
+}
+
+function lerLista() {
+  if (!senhaLista) { return; }
+  enviar({ acao: 'ler' });
+}
+
+btnEntrar.onclick = function () {
+  var s = elSenha.value.trim();
+  if (!s) { elErroSenha.textContent = 'Digite a senha.'; return; }
+  senhaLista = s;
+  elErroSenha.textContent = 'Conferindo...';
+  chamar({ acao: 'ler' }).then(function (res) {
+    try { localStorage.setItem(CHAVE_SENHA, s); } catch (e) {}
+    elSenha.value = '';
+    mostrarConteudo();
+    aplicar(res.itens);
+    situacaoLista('Lista atualizada em ' + hora(new Date()), false);
+  }).catch(function (erro) {
+    senhaLista = '';
+    if (erro.servidor && erro.message === 'senha') { elErroSenha.textContent = 'Senha incorreta.'; }
+    else { elErroSenha.textContent = 'Sem conexão com a planilha (' + erro.message + '). Tente de novo.'; }
+  });
+};
+
 function adicionar(nome) {
-  nome = String(nome).trim();
+  nome = String(nome).replace(/\s+/g, ' ').trim();
   if (!nome) { return; }
+  var passo = passoDe(nome);
+  var qtd = passo;
   for (var k = 0; k < itensLista.length; k++) {
-    if (semAcento(itensLista[k].nome) === semAcento(nome)) {
-      itensLista[k].qtd += passo(itensLista[k]);
-      itensLista[k].peguei = false;
-      gravarLista(); desenharLista(); return;
+    if (mesmoNome(itensLista[k].nome, nome)) {
+      nome = itensLista[k].nome;
+      qtd = Math.round((itensLista[k].qtd + passo) * 1000) / 1000;
+      itensLista.splice(k, 1);
+      break;
     }
   }
-  var p = produtoDaBase(nome);
-  itensLista.push({ nome: nome, qtd: 1, peguei: false });
-  gravarLista(); desenharLista();
+  itensLista.push({ nome: nome, qtd: qtd, peguei: false });   /* sobe para o topo */
+  desenharLista();
+  enviar({ acao: 'adicionar', item: nome, qtd: passo });
 }
 
 function desenharLista() {
   elItens.textContent = '';
   var total = 0, pego = 0, sem = 0;
-  itensLista.forEach(function (item, idx) {
-    var p = produtoDaBase(item.nome);
-    var preco = p ? numero(p.preco) : null;
-    var estimado = preco !== null ? Math.round(preco * item.qtd * 100) / 100 : null;
-    if (estimado !== null) { total += estimado; if (item.peguei) { pego += estimado; } } else { sem++; }
+  for (var k = itensLista.length - 1; k >= 0; k--) {   /* mais recente no topo */
+    (function (item) {
+      var p = produtoDaBase(item.nome);
+      var preco = p ? numero(p.preco) : null;
+      var estimado = preco !== null ? Math.round(preco * item.qtd * 100) / 100 : null;
+      if (estimado !== null) { total += estimado; if (item.peguei) { pego += estimado; } } else { sem++; }
 
-    var caixa = novo('div', item.peguei ? 'item pego' : 'item');
-    var topo = novo('div', 'topo');
-    var nomes = novo('div', '');
-    nomes.style.flex = '1';
-    nomes.appendChild(novo('div', 'nome', item.nome));
-    nomes.appendChild(novo('div', 'info', preco !== null ? dinheiro(p.preco) + (ehKg(p) ? ' / kg' : '') : 'sem preço'));
-    topo.appendChild(nomes);
-    var marca = document.createElement('input');
-    marca.type = 'checkbox';
-    marca.checked = !!item.peguei;
-    marca.title = 'Peguei';
-    marca.onchange = function () { item.peguei = marca.checked; gravarLista(); desenharLista(); };
-    topo.appendChild(marca);
-    caixa.appendChild(topo);
+      var caixa = novo('div', item.peguei ? 'item pego' : 'item');
+      var topo = novo('div', 'topo');
+      var nomes = novo('div', '');
+      nomes.style.flex = '1';
+      nomes.appendChild(novo('div', 'nome', item.nome));
+      nomes.appendChild(novo('div', 'info', preco !== null ? dinheiro(p.preco) + (ehKg(p) ? ' / kg' : '') : 'sem preço'));
+      topo.appendChild(nomes);
+      var marca = document.createElement('input');
+      marca.type = 'checkbox';
+      marca.checked = !!item.peguei;
+      marca.title = 'Peguei';
+      marca.onchange = function () {
+        item.peguei = marca.checked;
+        desenharLista();
+        enviar({ acao: 'peguei', item: item.nome, valor: item.peguei });
+      };
+      topo.appendChild(marca);
+      caixa.appendChild(topo);
 
-    var baixo = novo('div', 'baixo');
-    var qtd = novo('div', 'qtd');
-    var menos = novo('button', '', '−');
-    var mais = novo('button', '', '+');
-    menos.onclick = function () {
-      item.qtd = Math.round((item.qtd - passo(item)) * 10) / 10;
-      if (item.qtd <= 0) { itensLista.splice(idx, 1); }
-      gravarLista(); desenharLista();
-    };
-    mais.onclick = function () {
-      item.qtd = Math.round((item.qtd + passo(item)) * 10) / 10;
-      gravarLista(); desenharLista();
-    };
-    qtd.appendChild(menos);
-    qtd.appendChild(novo('span', '', textoQtd(item)));
-    qtd.appendChild(mais);
-    baixo.appendChild(qtd);
-    baixo.appendChild(novo('div', 'estimado', estimado !== null ? dinheiro(estimado.toFixed(2).replace('.', ',')) : '—'));
-    caixa.appendChild(baixo);
-    elItens.appendChild(caixa);
-  });
+      var baixo = novo('div', 'baixo');
+      var qtd = novo('div', 'qtd');
+      var menos = novo('button', '', '−');
+      var mais = novo('button', '', '+');
+      menos.onclick = function () {
+        var nova = Math.round((item.qtd - passoDe(item.nome)) * 1000) / 1000;
+        if (nova <= 0) {
+          itensLista.splice(itensLista.indexOf(item), 1);
+          desenharLista();
+          enviar({ acao: 'remover', item: item.nome });
+        } else {
+          item.qtd = nova;
+          desenharLista();
+          enviar({ acao: 'quantidade', item: item.nome, qtd: nova });
+        }
+      };
+      mais.onclick = function () {
+        item.qtd = Math.round((item.qtd + passoDe(item.nome)) * 1000) / 1000;
+        desenharLista();
+        enviar({ acao: 'quantidade', item: item.nome, qtd: item.qtd });
+      };
+      qtd.appendChild(menos);
+      qtd.appendChild(novo('span', '', textoQtd(item)));
+      qtd.appendChild(mais);
+      baixo.appendChild(qtd);
+      baixo.appendChild(novo('div', 'estimado', estimado !== null ? dinheiro(estimado.toFixed(2).replace('.', ',')) : '—'));
+      caixa.appendChild(baixo);
+      elItens.appendChild(caixa);
+    })(itensLista[k]);
+  }
   elTotEst.textContent = dinheiro(total.toFixed(2).replace('.', ','));
   elTotPego.textContent = dinheiro(pego.toFixed(2).replace('.', ','));
   elSemPreco.textContent = sem ? sem + (sem === 1 ? ' item sem preço, fora do total' : ' itens sem preço, fora do total') : '';
@@ -543,7 +674,7 @@ function desenharLista() {
 }
 
 elNovo.oninput = function () {
-  var digitado = elNovo.value.trim();
+  var digitado = elNovo.value.replace(/\s+/g, ' ').trim();
   var termo = semAcento(digitado);
   elSugestoes.textContent = '';
   if (termo.length < 2) { return; }
@@ -554,7 +685,7 @@ elNovo.oninput = function () {
   });
   var exato = produtos.some(function (p) { return semAcento(p.produto) === termo; });
   if (!exato) {
-    var livre = novo('div', 'livre', 'Adicionar "' + digitado + '" (sem preço)');
+    var livre = novo('div', 'livre', '+ Adicionar "' + digitado + '" (sem preço)');
     livre.onclick = function () { adicionar(digitado); elNovo.value = ''; elSugestoes.textContent = ''; };
     elSugestoes.appendChild(livre);
   }
@@ -562,10 +693,28 @@ elNovo.oninput = function () {
 
 btnLimpar.onclick = function () {
   itensLista = itensLista.filter(function (i) { return !i.peguei; });
-  gravarLista(); desenharLista();
+  desenharLista();
+  enviar({ acao: 'limparPegos' });
 };
 
-desenharLista();
+btnAtualizar.onclick = function () { situacaoLista('Atualizando...', false); lerLista(); };
+
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && telaLista.className.indexOf('ativa') >= 0) { lerLista(); }
+});
+
+function iniciarLista() {
+  var cache = null;
+  try { cache = JSON.parse(localStorage.getItem(CHAVE_CACHE)); } catch (e) {}
+  if (cache && Array.isArray(cache.itens)) {
+    itensLista = cache.itens;
+    situacaoLista('Mostrando a lista guardada em ' + hora(new Date(cache.quando)) + '. Atualizando...', false);
+  }
+  desenharLista();
+  if (senhaLista) { mostrarConteudo(); lerLista(); } else { mostrarEntrada(''); }
+}
+
+iniciarLista();
 carregar();
 carregarInflacao();
 </script>
