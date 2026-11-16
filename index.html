@@ -68,7 +68,9 @@
   /* inflação familiar */
   .indice { background: var(--cartao); border: 2px solid var(--linha); border-radius: 12px; padding: 14px; margin-top: 10px; }
   .indice .nomeInd { font-size: 17px; font-weight: bold; }
-  .indice .pct { font-size: 38px; font-weight: bold; margin-top: 4px; }
+  .indice .linhaInd { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-top: 8px; }
+  .indice .rotInd { font-size: 15px; color: var(--suave); }
+  .indice .pct { font-size: 28px; font-weight: bold; white-space: nowrap; }
   .indice .pct.sobe { color: var(--alerta); }
   .indice .pct.desce { color: var(--verde); }
   .indice .info { font-size: 14px; color: var(--suave); margin-top: 4px; }
@@ -129,10 +131,10 @@
   <div class="rotulo">Inflação familiar no período</div>
   <div id="infSituacao">Carregando...</div>
   <div id="infCartoes"></div>
-  <div id="infNota">Variação do que você pagou em cada produto, entre a primeira e a última compra, pesada pelo quanto você gastou com ele. Produto comprado uma vez só conta como zero. Redes juntas.</div>
+  <div id="infNota">"Desde": variação do preço de cada produto entre a primeira e a última compra. "Contra a média": última compra comparada com o preço médio que você pagou antes. Nos dois, cada produto pesa pelo quanto você gastou com ele; comprado uma vez só conta como zero; redes juntas.</div>
 </div>
 
-<div id="versao">Versão 5 - 04/11/2026</div>
+<div id="versao">Versão 6 - 15/11/2026</div>
 
 <script src="zxing.min.js"></script>
 <script>
@@ -395,30 +397,42 @@ abaInflacao.onclick = function () { trocarAba('inflacao'); };
 var elInfSit = document.getElementById('infSituacao');
 var elInfCartoes = document.getElementById('infCartoes');
 
+function numeroPct(v) {
+  return parseFloat(String(v === undefined ? '' : v).replace(/\./g, '').replace(',', '.'));
+}
+
+function linhaIndice(rotulo, n) {
+  var linha = novo('div', 'linhaInd');
+  linha.appendChild(novo('div', 'rotInd', rotulo));
+  var txt = (n > 0 ? '+' : '') + n.toFixed(2).replace('.', ',') + '%';
+  linha.appendChild(novo('div', 'pct' + (n > 0 ? ' sobe' : (n < 0 ? ' desce' : '')), txt));
+  return linha;
+}
+
 function montarInflacao(texto) {
   var linhas = lerCSV(texto);
   if (linhas.length < 2) { return false; }
   var cab = linhas[0].map(function (t) { return t.trim(); });
   var col = function (nome) { return cab.indexOf(nome); };
   var iNome = col('Índice'), iPct = col('Inflação familiar no período (%)'), iMed = col('Produtos medidos'),
-      iTot = col('Produtos no índice'), iDe = col('Desde'), iAte = col('Até');
+      iTot = col('Produtos no índice'), iDe = col('Desde'), iAte = col('Até'), iMedia = col('Atual x média anterior (%)');
   if (iNome < 0 || iPct < 0) { return false; }
   var cartoes = [];
   for (var k = 1; k < linhas.length; k++) {
     var l = linhas[k];
     if (!l[iNome]) { continue; }
-    var n = parseFloat(String(l[iPct]).replace(/\./g, '').replace(',', '.'));
+    var n = numeroPct(l[iPct]);
     if (isNaN(n)) { continue; }
     var c = novo('div', 'indice');
     c.appendChild(novo('div', 'nomeInd', l[iNome]));
-    var txt = (n > 0 ? '+' : '') + n.toFixed(2).replace('.', ',') + '%';
-    c.appendChild(novo('div', 'pct' + (n > 0 ? ' sobe' : (n < 0 ? ' desce' : '')), txt));
+    c.appendChild(linhaIndice(iDe >= 0 && l[iDe] ? 'Desde ' + l[iDe] : 'No período', n));
+    var m = iMedia >= 0 ? numeroPct(l[iMedia]) : NaN;
+    if (!isNaN(m)) {
+      c.appendChild(linhaIndice('Contra a média que paguei antes', m));
+    }
     var med = iMed >= 0 ? l[iMed] : '', tot = iTot >= 0 ? l[iTot] : '';
     if (med !== '' && tot !== '') {
       c.appendChild(novo('div', 'info', med + ' de ' + tot + ' produtos com preço comparado'));
-    }
-    if (iDe >= 0 && iAte >= 0 && l[iDe] && l[iAte]) {
-      c.appendChild(novo('div', 'info', 'Período: ' + l[iDe] + ' a ' + l[iAte]));
     }
     cartoes.push(c);
   }
